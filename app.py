@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file
 import os
 import logging
-import traceback
+import langsmith from traceback
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
