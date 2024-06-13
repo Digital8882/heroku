@@ -21,7 +21,7 @@ researcher = Agent(
         Adopt an analytical, empathetic, and narrative-driven tone, weaving factual insights with interviewees' experiences to provide a compelling view of product's market landscape.""",
     verbose=False,
     allow_delegation=True,
-    max_rpm=2,    
+    max_rpm=1,    
     llm=ChatOpenAI(temperature=0.2, model="gpt-3.5-turbo", max_tokens=4096),
 )
 product_manager = Agent(
