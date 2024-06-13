@@ -27,8 +27,25 @@ with st.form(key='input_form_unique'):
 if submit_button:
     with st.spinner("Please wait while the report is generating..."):
         try:
-            # Your logic for generating the report
-            st.success("Report generation complete!")
+            # Your logic for generating the report and interacting with the Flask backend
+            # For example, sending data to your Flask endpoint and receiving the report:
+            response = requests.post('https://sw-report-7df9fed5c54e.herokuapp.com/generate_report', json={
+                "email": email,
+                "icp_output": "ICP Output Placeholder",
+                "jtbd_output": "JTBD Output Placeholder",
+                "pains_output": "Pains Output Placeholder",
+                "gains_output": "Gains Output Placeholder",
+                "propdesign_output": "Proposition Design Placeholder",
+                "customerj_output": "Customer Journey Placeholder",
+                "channels_output": "Channels Placeholder",
+                "vc_output": "Value Creation Placeholder"
+            })
+
+            if response.status_code == 200:
+                st.success("Report generation complete! Check your email.")
+            else:
+                st.error("Failed to generate report. Please try again.")
+
         except Exception as e:
             logging.error(f"An error occurred: {e}")
             st.error(f"An error occurred: {e}")
