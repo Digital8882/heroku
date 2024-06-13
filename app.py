@@ -385,7 +385,7 @@ async def start_crew_process(email, product_service, price, currency, payment_fr
         tasks=[new_task, icp_task],
         agents=[researcher, product_manager, marketing_director, sales_director],
         manager_llm=ChatOpenAI(temperature=0, model="gpt-4o"),
-        max_rpm=1,
+        max_rpm=4,
         process=Process.hierarchical,
     )
 
