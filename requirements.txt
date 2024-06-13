@@ -7,3 +7,5 @@ langchain_openai
 langsmith
 crewai
 httpx
+embedchain
+chromadb
