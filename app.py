@@ -32,7 +32,7 @@ email_address = "yourorder@swiftlaunch.biz"
 email_password = os.environ.get('EMAIL_PASSWORD')
 LANGSMITH_API_KEY = os.environ.get('LANGSMITH_API_KEY')
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY'
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
 # Airtable configuration
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
