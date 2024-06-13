@@ -24,9 +24,6 @@ from langchain_openai import ChatOpenAI
 from langsmith import traceable
 from crewai import Crew, Process, Task
 from dotenv import load_dotenv
-import redis
-from rq import Queue
-from worker import conn
 
 app = Flask(__name__)
 
@@ -416,36 +413,6 @@ async def start_crew_process(email, product_service, price, currency, payment_fr
             raise
 
 @app.route('/generate_report', methods=['POST'])
-def generate_report_task(email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits):
-    try:
-        credits, record_id = check_credits(email)
-        if credits > 0:
-            icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output = asyncio.run(
-                start_crew_process(
-                    email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits
-                )
-            )
-            
-            send_to_airtable(email, icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output)
-            retrieved_outputs = retrieve_from_airtable(email)
-            pdf_filename = generate_pdf(*retrieved_outputs)
-            if pdf_filename:
-                if send_email_with_pdf(pdf_filename):
-                    new_credits = credits - 1
-                    update_credits(record_id, new_credits)
-                    return {"status": "success", "message": "Report generated and email sent successfully"}
-                else:
-                    return {"status": "error", "message": "Failed to send email"}
-            else:
-                return {"status": "error", "message": "PDF generation failed or exceeds size limit"}
-        else:
-            return {"status": "error", "message": "No credits available"}
-    except Exception as e:
-        logging.error(f"An error occurred: {str(e)}")
-        logging.debug(traceback.format_exc())
-        return {"status": "error", "message": "An internal error occurred"}
-
-@app.route('/generate_report', methods=['POST'])
 def generate_report():
     data = request.json
     email = data.get("email")
@@ -459,16 +426,34 @@ def generate_report():
     features = data.get("features")
     benefits = data.get("benefits")
 
-    job = q.enqueue(generate_report_task, email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits)
-    return jsonify({"status": "success", "message": "Report generation started", "job_id": job.get_id()}), 200
-
-@app.route('/job_status/<job_id>', methods=['GET'])
-def job_status(job_id):
-    job = q.fetch_job(job_id)
-    if job:
-        return jsonify({"job_id": job.get_id(), "status": job.get_status(), "result": job.result}), 200
-    else:
-        return jsonify({"status": "error", "message": "Job not found"}), 404
+    try:
+        credits, record_id = check_credits(email)
+        if credits > 0:
+            # Properly await the coroutine
+            icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output = asyncio.run(
+                start_crew_process(
+                    email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits
+                )
+            )
+            
+            send_to_airtable(email, icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output)
+            retrieved_outputs = retrieve_from_airtable(email)
+            pdf_filename = generate_pdf(*retrieved_outputs)
+            if pdf_filename:
+                if send_email_with_pdf(pdf_filename):
+                    new_credits = credits - 1
+                    update_credits(record_id, new_credits)
+                    return jsonify({"status": "success", "message": "Report generated and email sent successfully"}), 200
+                else:
+                    return jsonify({"status": "error", "message": "Failed to send email"}), 500
+            else:
+                return jsonify({"status": "error", "message": "PDF generation failed or exceeds size limit"}), 500
+        else:
+            return jsonify({"status": "error", "message": "No credits available"}), 400
+    except Exception as e:
+        logging.error(f"An error occurred: {str(e)}")
+        logging.debug(traceback.format_exc())
+        return jsonify({"status": "error", "message": "An internal error occurred"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
