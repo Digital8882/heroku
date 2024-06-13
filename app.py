@@ -14,24 +14,25 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListFlowabl
 from reportlab.lib.enums import TA_JUSTIFY
 import requests
 import httpx
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Email configuration
+
+
+# Load environment variables from .env file
+load_dotenv()
+
 smtp_server = "mail.privateemail.com"
 smtp_port = 587
 email_address = "yourorder@swiftlaunch.biz"
 email_password = os.environ.get('EMAIL_PASSWORD')
-
-
-# Environment variables for Langsmith
-os.environ["LANGSMITH_TRACING_V2"] = "true"
-os.environ["LANGSMITH_PROJECT"] = "SLfully12"
-os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
-os.environ["LANGSMITH_API_KEY"] = os.environ.get("LANGSMITH_API_KEY")
+LANGSMITH_API_KEY = os.environ.get('LANGSMITH_API_KEY')
+AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY'
 
 # Airtable configuration
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
