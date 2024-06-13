@@ -46,6 +46,9 @@ smtp_port = 587
 email_address = "yourorder@swiftlaunch.biz"
 email_password = os.environ.get('EMAIL_PASSWORD')
 LANGSMITH_API_KEY = os.environ.get('LANGSMITH_API_KEY')
+os.environ["LANGSMITH_TRACING_V2"] = "true"
+os.environ["LANGSMITH_PROJECT"] = "King Tik"
+os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
@@ -391,7 +394,7 @@ async def start_crew_process(email, product_service, price, currency, payment_fr
             results = await asyncio.wait_for(project_crew.kickoff(), timeout=110)
             icp_output = icp_task.output.exported_output if hasattr(icp_task.output, 'exported_output') else "No ICP output"
             logging.info("Crew process completed successfully")
-            return icp_output,
+            return icp_output, "channels_output", "pains_output", "gains_output", "jtbd_output", "propdesign_output", "customerj_output"
         except asyncio.TimeoutError:
             logging.error(f"TimeoutError on attempt {attempt + 1}")
             if attempt < retries - 1:
@@ -425,8 +428,12 @@ def generate_report():
     try:
         credits, record_id = check_credits(email)
         if credits > 0:
-            icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output = start_crew_process(
-                email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits)
+            # Properly await the coroutine
+            icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output = asyncio.run(
+                start_crew_process(
+                    email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits
+                )
+            )
             
             send_to_airtable(email, icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output)
             retrieved_outputs = retrieve_from_airtable(email)
@@ -448,4 +455,5 @@ def generate_report():
         return jsonify({"status": "error", "message": "An internal error occurred"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
