@@ -9,3 +9,5 @@ crewai
 httpx
 embedchain
 python-dotenv
+markdown
+langsmith
