@@ -1,7 +1,3 @@
-workers = 1
-timeout = 120
-worker_connections = 1000
-loglevel = 'info'
-keepalive = 2
-max_requests = 1000
-max_requests_jitter = 100
+# gunicorn_config.py
+bind = '0.0.0.0:{}'.format(os.environ.get('PORT', '5000'))
+workers = 3
