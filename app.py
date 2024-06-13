@@ -24,6 +24,9 @@ from langchain_openai import ChatOpenAI
 from langsmith import traceable
 from crewai import Crew, Process, Task
 from dotenv import load_dotenv
+import redis
+from rq import Queue
+from worker import conn
 
 app = Flask(__name__)
 
@@ -413,23 +416,10 @@ async def start_crew_process(email, product_service, price, currency, payment_fr
             raise
 
 @app.route('/generate_report', methods=['POST'])
-def generate_report():
-    data = request.json
-    email = data.get("email")
-    product_service = data.get("product_service")
-    price = data.get("price")
-    currency = data.get("currency")
-    payment_frequency = data.get("payment_frequency")
-    selling_scope = data.get("selling_scope")
-    location = data.get("location")
-    marketing_channels = data.get("marketing_channels")
-    features = data.get("features")
-    benefits = data.get("benefits")
-
+def generate_report_task(email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits):
     try:
         credits, record_id = check_credits(email)
         if credits > 0:
-            # Properly await the coroutine
             icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output = asyncio.run(
                 start_crew_process(
                     email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits
@@ -443,17 +433,42 @@ def generate_report():
                 if send_email_with_pdf(pdf_filename):
                     new_credits = credits - 1
                     update_credits(record_id, new_credits)
-                    return jsonify({"status": "success", "message": "Report generated and email sent successfully"}), 200
+                    return {"status": "success", "message": "Report generated and email sent successfully"}
                 else:
-                    return jsonify({"status": "error", "message": "Failed to send email"}), 500
+                    return {"status": "error", "message": "Failed to send email"}
             else:
-                return jsonify({"status": "error", "message": "PDF generation failed or exceeds size limit"}), 500
+                return {"status": "error", "message": "PDF generation failed or exceeds size limit"}
         else:
-            return jsonify({"status": "error", "message": "No credits available"}), 400
+            return {"status": "error", "message": "No credits available"}
     except Exception as e:
         logging.error(f"An error occurred: {str(e)}")
         logging.debug(traceback.format_exc())
-        return jsonify({"status": "error", "message": "An internal error occurred"}), 500
+        return {"status": "error", "message": "An internal error occurred"}
+
+@app.route('/generate_report', methods=['POST'])
+def generate_report():
+    data = request.json
+    email = data.get("email")
+    product_service = data.get("product_service")
+    price = data.get("price")
+    currency = data.get("currency")
+    payment_frequency = data.get("payment_frequency")
+    selling_scope = data.get("selling_scope")
+    location = data.get("location")
+    marketing_channels = data.get("marketing_channels")
+    features = data.get("features")
+    benefits = data.get("benefits")
+
+    job = q.enqueue(generate_report_task, email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits)
+    return jsonify({"status": "success", "message": "Report generation started", "job_id": job.get_id()}), 200
+
+@app.route('/job_status/<job_id>', methods=['GET'])
+def job_status(job_id):
+    job = q.fetch_job(job_id)
+    if job:
+        return jsonify({"job_id": job.get_id(), "status": job.get_status(), "result": job.result}), 200
+    else:
+        return jsonify({"status": "error", "message": "Job not found"}), 404
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
