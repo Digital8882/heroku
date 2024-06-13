@@ -1,0 +1,10 @@
+Flask
+streamlit
+gunicorn
+requests
+smtplib
+langchain_openai
+langsmith
+crewai
+markdown
+reportlab
