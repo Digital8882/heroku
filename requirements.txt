@@ -8,3 +8,4 @@ langsmith
 crewai
 requests
 markdown
+python-dotenv
