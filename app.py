@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import os
 import smtplib
 import logging
@@ -8,7 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 import time
-import asyncio 
+import asyncio
 import traceback
 import builtins
 import re
@@ -48,7 +48,7 @@ email_address = "yourorder@swiftlaunch.biz"
 email_password = os.environ.get('EMAIL_PASSWORD')
 LANGSMITH_API_KEY = os.environ.get('LANGSMITH_API_KEY')
 os.environ["LANGSMITH_TRACING_V2"] = "true"
-os.environ["LANGSMITH_PROJECT"] = "King Tik"
+os.environ["LANGSMITH_PROJECT"] = "King Tik Tik"
 os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
@@ -67,11 +67,6 @@ AIRTABLE_FIELDS = {
     'customerj': 'fld9XtbBFTEEiq70F'
 }
 
-# Add fields for chunks
-for key in ['icp', 'channels', 'pains', 'gains', 'jtbd', 'propdesign', 'customerj']:
-    for i in range(1, 11):  # Assuming a maximum of 10 chunks per field, adjust as needed
-        AIRTABLE_FIELDS[f"{key}_{i}"] = f"fld{key.capitalize()}{i:02}"
-
 # Save the original print function
 original_print = builtins.print
 
@@ -86,36 +81,23 @@ def patched_print(*args, **kwargs):
 # Patch the print function
 builtins.print = patched_print
 
-def chunk_text(text, chunk_size):
-    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
-
 @traceable
 def send_to_airtable(email, icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output):
-    chunks = {
-        'icp': chunk_text(icp_output, CHUNK_SIZE),
-        'channels': chunk_text(channels_output, CHUNK_SIZE),
-        'pains': chunk_text(pains_output, CHUNK_SIZE),
-        'gains': chunk_text(gains_output, CHUNK_SIZE),
-        'jtbd': chunk_text(jtbd_output, CHUNK_SIZE),
-        'propdesign': chunk_text(propdesign_output, CHUNK_SIZE),
-        'customerj': chunk_text(customerj_output, CHUNK_SIZE),
-    }
-
     data = {
         "fields": {
-            "Email": email
+            "Email": email,
+            AIRTABLE_FIELDS['icp']: icp_output,
+            AIRTABLE_FIELDS['channels']: channels_output,
+            AIRTABLE_FIELDS['pains']: pains_output,
+            AIRTABLE_FIELDS['gains']: gains_output,
+            AIRTABLE_FIELDS['jtbd']: jtbd_output,
+            AIRTABLE_FIELDS['propdesign']: propdesign_output,
+            AIRTABLE_FIELDS['customerj']: customerj_output,
         }
     }
+    store_data_in_airtable(data)
 
-    for key, chunks_list in chunks.items():
-        for i, chunk in enumerate(chunks_list):
-            field_name = f"{key}_{i+1}"
-            if field_name in AIRTABLE_FIELDS:
-                data["fields"][AIRTABLE_FIELDS[field_name]] = chunk
-
-    store_chunk_in_airtable(data)
-
-def store_chunk_in_airtable(data):
+def store_data_in_airtable(data):
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
@@ -125,7 +107,7 @@ def store_chunk_in_airtable(data):
         response = client.post(url, headers=headers, json=data)
         response.raise_for_status()
         record = response.json()
-        logging.info(f"Airtable chunk response: {record}")
+        logging.info(f"Airtable response: {record}")
         return record['id']
 
 @traceable
@@ -143,37 +125,15 @@ def retrieve_from_airtable(email):
         response.raise_for_status()
         records = response.json().get('records', [])
 
-        chunks = {
-            'icp': [],
-            'channels': [],
-            'pains': [],
-            'gains': [],
-            'jtbd': [],
-            'propdesign': [],
-            'customerj': [],
-        }
-
-        for record in records:
-            fields = record.get('fields', {})
-            for key in chunks.keys():
-                for i in range(1, 11):  # assuming no more than 10 chunks per output
-                    field_name = f"{AIRTABLE_FIELDS[key]}_{i}"
-                    chunk = fields.get(field_name, '')
-                    if chunk:
-                        chunks[key].append(chunk)
-                    else:
-                        break
-
-        assembled_outputs = {key: ''.join(value) for key, value in chunks.items()}
-        logging.info("Data retrieved and reassembled from Airtable successfully")
+        fields = records[0].get('fields', {}) if records else {}
         return (
-            assembled_outputs['icp'],
-            assembled_outputs['channels'],
-            assembled_outputs['pains'],
-            assembled_outputs['gains'],
-            assembled_outputs['jtbd'],
-            assembled_outputs['propdesign'],
-            assembled_outputs['customerj'],
+            fields.get(AIRTABLE_FIELDS['icp'], ""),
+            fields.get(AIRTABLE_FIELDS['channels'], ""),
+            fields.get(AIRTABLE_FIELDS['pains'], ""),
+            fields.get(AIRTABLE_FIELDS['gains'], ""),
+            fields.get(AIRTABLE_FIELDS['jtbd'], ""),
+            fields.get(AIRTABLE_FIELDS['propdesign'], ""),
+            fields.get(AIRTABLE_FIELDS['customerj'], "")
         )
 
 @traceable
@@ -370,7 +330,6 @@ def send_email_with_pdf(pdf_filename):
         logging.error(f"Failed to send email: {str(e)}")
         logging.debug(traceback.format_exc())
         return False
-
 
 @traceable
 async def start_crew_process(email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits, retries=3):
