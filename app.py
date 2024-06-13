@@ -48,24 +48,9 @@ email_address = "yourorder@swiftlaunch.biz"
 email_password = os.environ.get('EMAIL_PASSWORD')
 LANGSMITH_API_KEY = os.environ.get('LANGSMITH_API_KEY')
 os.environ["LANGSMITH_TRACING_V2"] = "true"
-os.environ["LANGSMITH_PROJECT"] = "King Tik Tik"
+os.environ["LANGSMITH_PROJECT"] = "King Tikt"
 os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
-AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-
-AIRTABLE_BASE_ID = 'appPcWNUeei7MNMCj'
-AIRTABLE_TABLE_NAME = 'tblaMtAcnVa4nwnby'
-AIRTABLE_FIELDS = {
-    'email': 'fldsx1iIk4FiRaLi8',
-    'credits': 'fldxwzSmMmldMGlgI',
-    'icp': 'fldL1kkrGflCtOxwa',
-    'channels': 'flduJ5ubWm0Bs2Ile',
-    'jtbd': 'fldFFAnoI7to8ZXgu',
-    'pains': 'fldyazmtByhtLBEds',
-    'gains': 'fldudHL1MwHsIHrNO',
-    'propdesign': 'fldXZ4CLKu2p85gPa',
-    'customerj': 'fld9XtbBFTEEiq70F'
-}
 
 # Save the original print function
 original_print = builtins.print
@@ -80,117 +65,6 @@ def patched_print(*args, **kwargs):
 
 # Patch the print function
 builtins.print = patched_print
-
-@traceable
-def send_to_airtable(email, icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output):
-    data = {
-        "fields": {
-            "Email": email,
-            AIRTABLE_FIELDS['icp']: icp_output,
-            AIRTABLE_FIELDS['channels']: channels_output,
-            AIRTABLE_FIELDS['pains']: pains_output,
-            AIRTABLE_FIELDS['gains']: gains_output,
-            AIRTABLE_FIELDS['jtbd']: jtbd_output,
-            AIRTABLE_FIELDS['propdesign']: propdesign_output,
-            AIRTABLE_FIELDS['customerj']: customerj_output,
-        }
-    }
-    store_data_in_airtable(data)
-
-def store_data_in_airtable(data):
-    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
-    headers = {
-        "Authorization": f"Bearer {AIRTABLE_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    with httpx.Client() as client:
-        response = client.post(url, headers=headers, json=data)
-        response.raise_for_status()
-        record = response.json()
-        logging.info(f"Airtable response: {record}")
-        return record['id']
-
-@traceable
-def retrieve_from_airtable(email):
-    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
-    headers = {
-        "Authorization": f"Bearer {AIRTABLE_API_KEY}"
-    }
-    params = {
-        "filterByFormula": f"{{{AIRTABLE_FIELDS['email']}}}='{email}'"
-    }
-
-    with httpx.Client() as client:
-        response = client.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        records = response.json().get('records', [])
-
-        fields = records[0].get('fields', {}) if records else {}
-        return (
-            fields.get(AIRTABLE_FIELDS['icp'], ""),
-            fields.get(AIRTABLE_FIELDS['channels'], ""),
-            fields.get(AIRTABLE_FIELDS['pains'], ""),
-            fields.get(AIRTABLE_FIELDS['gains'], ""),
-            fields.get(AIRTABLE_FIELDS['jtbd'], ""),
-            fields.get(AIRTABLE_FIELDS['propdesign'], ""),
-            fields.get(AIRTABLE_FIELDS['customerj'], "")
-        )
-
-@traceable
-def check_credits(email):
-    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
-    headers = {
-        "Authorization": f"Bearer {AIRTABLE_API_KEY}"
-    }
-    params = {
-        "filterByFormula": f"{{{AIRTABLE_FIELDS['email']}}}='{email}'"
-    }
-
-    with httpx.Client() as client:
-        try:
-            logging.info(f"Sending GET request to {url} with params {params}")
-            response = client.get(url, headers=headers, params=params)
-            logging.info(f"HTTP Request: GET {response.url} {response.status_code} {response.reason_phrase}")
-            response.raise_for_status()
-            logging.debug(f"Response JSON: {response.json()}")
-            records = response.json().get('records', [])
-            if records:
-                fields = records[0].get('fields', {})
-                logging.debug(f"Fields returned for the record: {fields}")
-                credits = fields.get('Credits', 0)
-                if credits is not None:
-                    credits = int(credits)  # Ensure credits is treated as an integer
-                else:
-                    credits = 0
-                record_id = records[0]['id']
-                logging.info(f"Email {email} found. Credits: {credits}")
-                return credits, record_id
-            else:
-                logging.info(f"Email {email} not found.")
-            return 0, None
-        except httpx.HTTPStatusError as e:
-            logging.error(f"HTTP error occurred: {e.response.status_code} - {e.response.text}")
-        except Exception as e:
-            logging.error(f"An error occurred: {str(e)}")
-
-@traceable
-def update_credits(record_id, new_credits):
-    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}/{record_id}"
-    headers = {
-        "Authorization": f"Bearer {AIRTABLE_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "fields": {
-            AIRTABLE_FIELDS['credits']: new_credits
-        }
-    }
-    with httpx.Client() as client:
-        response = client.patch(url, headers=headers, json=data)
-        response.raise_for_status()
-        record = response.json()
-        logging.info(f"Airtable update response: {record}")
-        return record['id']
 
 @traceable
 def format_output(output):
@@ -386,29 +260,20 @@ def generate_report():
     benefits = data.get("benefits")
 
     try:
-        credits, record_id = check_credits(email)
-        if credits > 0:
-            # Properly await the coroutine
-            icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output = asyncio.run(
-                start_crew_process(
-                    email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits
-                )
+        icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output = asyncio.run(
+            start_crew_process(
+                email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits
             )
-            
-            send_to_airtable(email, icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output)
-            retrieved_outputs = retrieve_from_airtable(email)
-            pdf_filename = generate_pdf(*retrieved_outputs)
-            if pdf_filename:
-                if send_email_with_pdf(pdf_filename):
-                    new_credits = credits - 1
-                    update_credits(record_id, new_credits)
-                    return jsonify({"status": "success", "message": "Report generated and email sent successfully"}), 200
-                else:
-                    return jsonify({"status": "error", "message": "Failed to send email"}), 500
+        )
+
+        pdf_filename = generate_pdf(icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output)
+        if pdf_filename:
+            if send_email_with_pdf(pdf_filename):
+                return jsonify({"status": "success", "message": "Report generated and email sent successfully"}), 200
             else:
-                return jsonify({"status": "error", "message": "PDF generation failed or exceeds size limit"}), 500
+                return jsonify({"status": "error", "message": "Failed to send email"}), 500
         else:
-            return jsonify({"status": "error", "message": "No credits available"}), 400
+            return jsonify({"status": "error", "message": "PDF generation failed or exceeds size limit"}), 500
     except Exception as e:
         logging.error(f"An error occurred: {str(e)}")
         logging.debug(traceback.format_exc())
