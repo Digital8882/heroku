@@ -9,3 +9,5 @@ crewai
 requests
 markdown
 python-dotenv
+rq
+redis
