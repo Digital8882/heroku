@@ -11,3 +11,5 @@ embedchain
 python-dotenv
 markdown
 langsmith
+embedchain
+chromadb
