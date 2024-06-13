@@ -1,27 +1,42 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 import os
-import logging
-import langsmith from traceback
 import smtplib
+import logging
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-from io import BytesIO
+import time
+import traceback
+import builtins
+import re
+import httpx
+import markdown
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListFlowable, ListItem
 from reportlab.lib.enums import TA_JUSTIFY
-import requests
-import httpx
+from SL_agents import researcher, product_manager, marketing_director, sales_director
+from SL_tasks import icp_task, get_channels_task_template, pains_task, gains_task, jtbd_task, propdesign_task, customerj_task
+from langchain_openai import ChatOpenAI
+from langsmith import traceable
+from crewai import Crew, Process, Task
 from dotenv import load_dotenv
 
 app = Flask(__name__)
 
+@app.route('/')
+def index():
+    return "Welcome to Swift Launch Backend API"
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(os.path.join(app.root_path, 'static'),
+                               'favicon.ico', mimetype='image/vnd.microsoft.icon')
+
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
-
 
 # Load environment variables from .env file
 load_dotenv()
@@ -34,167 +49,403 @@ LANGSMITH_API_KEY = os.environ.get('LANGSMITH_API_KEY')
 AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
-# Airtable configuration
-AIRTABLE_API_KEY = os.environ.get('AIRTABLE_API_KEY')
 AIRTABLE_BASE_ID = 'appPcWNUeei7MNMCj'
-AIRTABLE_TABLE_NAME = 'Table%201'
-EMAIL_FIELD_NAME = 'Email'
-ICPF_FIELD_NAME = 'Icp'
-JTBD_FIELD_NAME = 'Jtbd'
-PAINS_FIELD_NAME = 'Pains'
-GAINS_FIELD_NAME = 'Gains'
-PROPDESIGN_FIELD_NAME = 'Propdesign'
-CUSTOMERJ_FIELD_NAME = 'Customerj'
-CHANNELS_FIELD_NAME = 'Channels'
-VC_FIELD_NAME = 'Vc'
+AIRTABLE_TABLE_NAME = 'tblaMtAcnVa4nwnby'
+AIRTABLE_FIELDS = {
+    'email': 'fldsx1iIk4FiRaLi8',
+    'credits': 'fldxwzSmMmldMGlgI',
+    'icp': 'fldL1kkrGflCtOxwa',
+    'channels': 'flduJ5ubWm0Bs2Ile',
+    'jtbd': 'fldFFAnoI7to8ZXgu',
+    'pains': 'fldyazmtByhtLBEds',
+    'gains': 'fldudHL1MwHsIHrNO',
+    'propdesign': 'fldXZ4CLKu2p85gPa',
+    'customerj': 'fld9XtbBFTEEiq70F'
+}
 
-def send_email(subject, body, to_email, pdf_content):
-    logging.debug("Preparing to send email...")
+# Add fields for chunks
+for key in ['icp', 'channels', 'pains', 'gains', 'jtbd', 'propdesign', 'customerj']:
+    for i in range(1, 11):  # Assuming a maximum of 10 chunks per field, adjust as needed
+        AIRTABLE_FIELDS[f"{key}_{i}"] = f"fld{key.capitalize()}{i:02}"
+
+# Save the original print function
+original_print = builtins.print
+
+# Define a patched print function that logs instead of printing
+def patched_print(*args, **kwargs):
     try:
-        msg = MIMEMultipart()
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = to_email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain'))
+        original_print(*args, **kwargs)
+    except BrokenPipeError:
+        logging.error(f"BrokenPipeError: {args}")
+        logging.debug(traceback.format_exc())
 
-        part = MIMEBase('application', 'octet-stream')
-        part.set_payload(pdf_content)
-        encoders.encode_base64(part)
-        part.add_header('Content-Disposition', 'attachment; filename="report.pdf"')
-        msg.attach(part)
+# Patch the print function
+builtins.print = patched_print
 
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.sendmail(SENDER_EMAIL, to_email, msg.as_string())
+def chunk_text(text, chunk_size):
+    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
-        logging.debug("Email sent successfully")
-        return True
-    except Exception as e:
-        logging.error(f"Failed to send email: {e}")
-        return False
+@traceable
+def send_to_airtable(email, icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output):
+    chunks = {
+        'icp': chunk_text(icp_output, CHUNK_SIZE),
+        'channels': chunk_text(channels_output, CHUNK_SIZE),
+        'pains': chunk_text(pains_output, CHUNK_SIZE),
+        'gains': chunk_text(gains_output, CHUNK_SIZE),
+        'jtbd': chunk_text(jtbd_output, CHUNK_SIZE),
+        'propdesign': chunk_text(propdesign_output, CHUNK_SIZE),
+        'customerj': chunk_text(customerj_output, CHUNK_SIZE),
+    }
 
-def update_airtable(email, icp_output, jtbd_output, pains_output, gains_output, propdesign_output, customerj_output, channels_output, vc_output):
-    logging.debug("Updating Airtable...")
+    data = {
+        "fields": {
+            "Email": email
+        }
+    }
+
+    for key, chunks_list in chunks.items():
+        for i, chunk in enumerate(chunks_list):
+            field_name = f"{key}_{i+1}"
+            if field_name in AIRTABLE_FIELDS:
+                data["fields"][AIRTABLE_FIELDS[field_name]] = chunk
+
+    store_chunk_in_airtable(data)
+
+def store_chunk_in_airtable(data):
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
     }
-    data = {
-        "records": [
-            {
-                "fields": {
-                    EMAIL_FIELD_NAME: email,
-                    ICPF_FIELD_NAME: icp_output,
-                    JTBD_FIELD_NAME: jtbd_output,
-                    PAINS_FIELD_NAME: pains_output,
-                    GAINS_FIELD_NAME: gains_output,
-                    PROPDESIGN_FIELD_NAME: propdesign_output,
-                    CUSTOMERJ_FIELD_NAME: customerj_output,
-                    CHANNELS_FIELD_NAME: channels_output,
-                    VC_FIELD_NAME: vc_output
-                }
-            }
-        ]
-    }
-    try:
-        response = requests.post(url, headers=headers, json=data)
+    with httpx.Client() as client:
+        response = client.post(url, headers=headers, json=data)
         response.raise_for_status()
-        response_data = response.json()
-        logging.debug(f"Airtable response: {response_data}")
-        return response_data['records'][0]['id']
-    except requests.exceptions.RequestException as req_err:
-        logging.error(f"Request error occurred: {req_err}")
-        return None
+        record = response.json()
+        logging.info(f"Airtable chunk response: {record}")
+        return record['id']
 
-def retrieve_from_airtable(record_id):
-    logging.debug(f"Retrieving data from Airtable for record ID: {record_id}")
+@traceable
+def retrieve_from_airtable(email):
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_API_KEY}"
+    }
+    params = {
+        "filterByFormula": f"{{{AIRTABLE_FIELDS['email']}}}='{email}'"
+    }
+
+    with httpx.Client() as client:
+        response = client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        records = response.json().get('records', [])
+
+        chunks = {
+            'icp': [],
+            'channels': [],
+            'pains': [],
+            'gains': [],
+            'jtbd': [],
+            'propdesign': [],
+            'customerj': [],
+        }
+
+        for record in records:
+            fields = record.get('fields', {})
+            for key in chunks.keys():
+                for i in range(1, 11):  # assuming no more than 10 chunks per output
+                    field_name = f"{AIRTABLE_FIELDS[key]}_{i}"
+                    chunk = fields.get(field_name, '')
+                    if chunk:
+                        chunks[key].append(chunk)
+                    else:
+                        break
+
+        assembled_outputs = {key: ''.join(value) for key, value in chunks.items()}
+        logging.info("Data retrieved and reassembled from Airtable successfully")
+        return (
+            assembled_outputs['icp'],
+            assembled_outputs['channels'],
+            assembled_outputs['pains'],
+            assembled_outputs['gains'],
+            assembled_outputs['jtbd'],
+            assembled_outputs['propdesign'],
+            assembled_outputs['customerj'],
+        )
+
+@traceable
+def check_credits(email):
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_API_KEY}"
+    }
+    params = {
+        "filterByFormula": f"{{{AIRTABLE_FIELDS['email']}}}='{email}'"
+    }
+
+    with httpx.Client() as client:
+        try:
+            logging.info(f"Sending GET request to {url} with params {params}")
+            response = client.get(url, headers=headers, params=params)
+            logging.info(f"HTTP Request: GET {response.url} {response.status_code} {response.reason_phrase}")
+            response.raise_for_status()
+            logging.debug(f"Response JSON: {response.json()}")
+            records = response.json().get('records', [])
+            if records:
+                fields = records[0].get('fields', {})
+                logging.debug(f"Fields returned for the record: {fields}")
+                credits = fields.get('Credits', 0)
+                if credits is not None:
+                    credits = int(credits)  # Ensure credits is treated as an integer
+                else:
+                    credits = 0
+                record_id = records[0]['id']
+                logging.info(f"Email {email} found. Credits: {credits}")
+                return credits, record_id
+            else:
+                logging.info(f"Email {email} not found.")
+            return 0, None
+        except httpx.HTTPStatusError as e:
+            logging.error(f"HTTP error occurred: {e.response.status_code} - {e.response.text}")
+        except Exception as e:
+            logging.error(f"An error occurred: {str(e)}")
+
+@traceable
+def update_credits(record_id, new_credits):
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}/{record_id}"
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
     }
-    try:
-        response = requests.get(url, headers=headers)
+    data = {
+        "fields": {
+            AIRTABLE_FIELDS['credits']: new_credits
+        }
+    }
+    with httpx.Client() as client:
+        response = client.patch(url, headers=headers, json=data)
         response.raise_for_status()
-        record = response.json().get('fields', {})
-        logging.debug(f"Retrieved record: {record}")
-        return (
-            record.get(ICPF_FIELD_NAME, ''),
-            record.get(JTBD_FIELD_NAME, ''),
-            record.get(PAINS_FIELD_NAME, ''),
-            record.get(GAINS_FIELD_NAME, ''),
-            record.get(PROPDESIGN_FIELD_NAME, ''),
-            record.get(CUSTOMERJ_FIELD_NAME, ''),
-            record.get(CHANNELS_FIELD_NAME, ''),
-            record.get(VC_FIELD_NAME, '')
-        )
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to retrieve data from Airtable: {e}")
-        return None, None, None, None, None, None, None, None
+        record = response.json()
+        logging.info(f"Airtable update response: {record}")
+        return record['id']
 
-def create_pdf(content):
-    buffer = BytesIO()
+@traceable
+def format_output(output):
+    return output.strip()
+
+@traceable
+def create_pdf(content, filename):
+    buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='Justify', alignment=TA_JUSTIFY))
+    styles.add(ParagraphStyle(name='Justify', alignment=TA_JUSTIFY, spaceAfter=3.6))  # Reduce spacing by 50%
+    styles.add(ParagraphStyle(name='Bold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=13.2))  # Increase font size by 10%
+    styles['Normal'].fontSize = 13.2  # Increase font size by 10%
 
     elements = []
 
-    for section_title, section_content in content.items():
-        elements.append(Paragraph(f"<b>{section_title}</b>", styles['Normal']))
-        elements.append(Spacer(1, 12))
-        elements.append(Paragraph(section_content, styles['Justify']))
-        elements.append(Spacer(1, 12))
+    # Add header
+    header = Paragraph("<para align=right><font color='orange' size=12>Swift Launch Report</font></para>", styles['Normal'])
+    elements.append(header)
+    elements.append(Spacer(1, 18))  # Small spacer after the header
+
+    # Split content into lines
+    lines = content.split('\n')
+
+    for line in lines:
+        line = line.strip()
+        if line.startswith('## '):
+            elements.append(Spacer(1, 13.5))  # Increase space above headers by 50%
+            elements.append(Paragraph(line[3:], styles['Bold']))  # Bold and underline headers
+            elements.append(Spacer(1, 3.6))  # Space after headers
+        elif line.startswith('-'):
+            # Handle bullet points
+            items = line.split('- ')[1:]
+            list_items = []
+            for item in items:
+                list_items.append(ListItem(Paragraph(item, styles['Justify']), leftIndent=20))
+            elements.append(ListFlowable(list_items, bulletType='bullet'))
+        elif line.startswith('**') and line.endswith('**'):
+            # Handle bold lines
+            elements.append(Paragraph(line.strip('*'), styles['Bold']))
+            # Add specific check for the section needing more space
+            if line.strip('*') == "Unique Selling Points and Positioning:":
+                elements.append(Spacer(1, 14.4))  # Increase space after specific bold lines by 100%
+            else:
+                elements.append(Spacer(1, 3.6))  # Default space after bold lines
+        else:
+            # Handle normal paragraphs
+            elements.append(Paragraph(line, styles['Justify']))
+            elements.append(Spacer(1, 1.8))  # Reduce spacing by 50% below headers and content
 
     doc.build(elements)
+
+    buffer.seek(0)
+    with open(filename, 'wb') as f:
+        f.write(buffer.getvalue())
     buffer.seek(0)
     return buffer
+
+@traceable
+def generate_pdf(icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output):
+    # Combine all task outputs into a single markdown string
+    combined_content = f"""
+## ICP Output
+{icp_output}
+
+## Channels Output
+{channels_output}
+
+## Pains Output
+{pains_output}
+
+## Gains Output
+{gains_output}
+
+## JTBD Output
+{jtbd_output}
+
+## Product Design Output
+{propdesign_output}
+
+## Customer Journey Output
+{customerj_output}
+    """
+    
+    # Convert the combined content to HTML
+    html_content = markdown.markdown(combined_content)
+
+    # Create the PDF file
+    output_filename = "Swift_Launch_Report.pdf"
+    create_pdf(html_content, output_filename)
+    logging.info(f"PDF generated: {output_filename}")
+
+    # Check file size
+    file_size = os.path.getsize(output_filename)
+    logging.info(f"PDF file size: {file_size} bytes")
+    if file_size > 20 * 1024 * 1024:  # Check if file size is greater than 20MB
+        logging.error("PDF file size exceeds the 20MB limit")
+        return None
+
+    return output_filename
+
+@traceable
+def send_email_with_pdf(pdf_filename):
+    try:
+        if not pdf_filename or not os.path.exists(pdf_filename):
+            logging.error(f"File not found or exceeds size limit: {pdf_filename}")
+            return False
+
+        logging.info(f"Preparing to send email to {RECEIVER_EMAIL} with attachment {pdf_filename}")
+
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = RECEIVER_EMAIL
+        msg['Subject'] = 'Your Swift Launch Report'
+        body = 'Please find attached your Swift Launch Report.'
+        msg.attach(MIMEText(body, 'plain'))
+
+        with open(pdf_filename, "rb") as attachment:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f"attachment; filename={pdf_filename}")
+            msg.attach(part)
+
+        logging.info("Connecting to SMTP server")
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+
+        logging.info("Sending email")
+        text = msg.as_string()
+        server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, text)
+        server.quit()
+        logging.info(f"Email sent to {RECEIVER_EMAIL} with attachment {pdf_filename}")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to send email: {str(e)}")
+        logging.debug(traceback.format_exc())
+        return False
+
+
+@traceable
+async def start_crew_process(email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits, retries=3):
+    task_description = f"New task from {email} selling {product_service} at {price} {currency} with payment frequency {payment_frequency}."
+    if selling_scope == "Locally":
+        task_description += f" Location: {location}."
+    task_description += f" Focus on the following marketing channels: {', '.join(marketing_channels)}."
+
+    new_task = Task(description=task_description, expected_output="...")
+
+    project_crew = Crew(
+        tasks=[new_task, icp_task],
+        agents=[researcher, product_manager, marketing_director, sales_director],
+        manager_llm=ChatOpenAI(temperature=0, model="gpt-4o"),
+        max_rpm=4,
+        process=Process.hierarchical,
+    )
+
+    for attempt in range(retries):
+        try:
+            logging.info(f"Starting crew process, attempt {attempt + 1}")
+            results = await asyncio.wait_for(project_crew.kickoff(), timeout=110)
+            icp_output = icp_task.output.exported_output if hasattr(icp_task.output, 'exported_output') else "No ICP output"
+            logging.info("Crew process completed successfully")
+            return icp_output,
+        except asyncio.TimeoutError:
+            logging.error(f"TimeoutError on attempt {attempt + 1}")
+            if attempt < retries - 1:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                raise
+        except BrokenPipeError as e:
+            logging.error(f"BrokenPipeError occurred on attempt {attempt + 1}: {e}")
+            if attempt < retries - 1:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                raise
+        except Exception as e:
+            logging.error(f"An error occurred during the crew process: {e}")
+            raise
 
 @app.route('/generate_report', methods=['POST'])
 def generate_report():
     data = request.json
     email = data.get("email")
-    icp_output = data.get("icp_output")
-    jtbd_output = data.get("jtbd_output")
-    pains_output = data.get("pains_output")
-    gains_output = data.get("gains_output")
-    propdesign_output = data.get("propdesign_output")
-    customerj_output = data.get("customerj_output")
-    channels_output = data.get("channels_output")
-    vc_output = data.get("vc_output")
+    product_service = data.get("product_service")
+    price = data.get("price")
+    currency = data.get("currency")
+    payment_frequency = data.get("payment_frequency")
+    selling_scope = data.get("selling_scope")
+    location = data.get("location")
+    marketing_channels = data.get("marketing_channels")
+    features = data.get("features")
+    benefits = data.get("benefits")
 
     try:
-        record_id = update_airtable(email, icp_output, jtbd_output, pains_output, gains_output, propdesign_output, customerj_output, channels_output, vc_output)
-        if record_id:
-            st.success("Airtable updated successfully!")
-            retrieved_data = retrieve_from_airtable(record_id)
-            if all(retrieved_data):
-                pdf_content = create_pdf({
-                    "ICP Output": retrieved_data[0],
-                    "JTBD Output": retrieved_data[1],
-                    "Pains Output": retrieved_data[2],
-                    "Gains Output": retrieved_data[3],
-                    "Proposition Design": retrieved_data[4],
-                    "Customer Journey": retrieved_data[5],
-                    "Channels": retrieved_data[6],
-                    "Value Creation": retrieved_data[7]
-                })
-                if send_email(subject="Your SWIFT LAUNCH WORKS Report", body="Please find attached your marketing report.", to_email=email, pdf_content=pdf_content.getvalue()):
+        credits, record_id = check_credits(email)
+        if credits > 0:
+            icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output = start_crew_process(
+                email, product_service, price, currency, payment_frequency, selling_scope, location, marketing_channels, features, benefits)
+            
+            send_to_airtable(email, icp_output, channels_output, pains_output, gains_output, jtbd_output, propdesign_output, customerj_output)
+            retrieved_outputs = retrieve_from_airtable(email)
+            pdf_filename = generate_pdf(*retrieved_outputs)
+            if pdf_filename:
+                if send_email_with_pdf(pdf_filename):
+                    new_credits = credits - 1
+                    update_credits(record_id, new_credits)
                     return jsonify({"status": "success", "message": "Report generated and email sent successfully"}), 200
                 else:
-                    return jsonify({"status": "error", "message": "Failed to send the report. Please try again later."}), 500
+                    return jsonify({"status": "error", "message": "Failed to send email"}), 500
             else:
-                return jsonify({"status": "error", "message": "Failed to retrieve data from Airtable."}), 500
+                return jsonify({"status": "error", "message": "PDF generation failed or exceeds size limit"}), 500
         else:
-            return jsonify({"status": "error", "message": "Failed to update Airtable."}), 500
+            return jsonify({"status": "error", "message": "No credits available"}), 400
     except Exception as e:
         logging.error(f"An error occurred: {str(e)}")
         logging.debug(traceback.format_exc())
         return jsonify({"status": "error", "message": "An internal error occurred"}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
-
+    app.run(debug=True)
