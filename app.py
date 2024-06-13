@@ -21,10 +21,11 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Email configuration
-SMTP_SERVER = 'smtp-mail.outlook.com'
-SMTP_PORT = 587
-SENDER_EMAIL = 'info@swiftlaunch.biz'
-SENDER_PASSWORD = os.environ.get('SENDER_PASSWORD')
+smtp_server = "mail.privateemail.com"
+smtp_port = 587
+email_address = "yourorder@swiftlaunch.biz"
+email_password = os.environ.get('EMAIL_PASSWORD')
+
 
 # Environment variables for Langsmith
 os.environ["LANGSMITH_TRACING_V2"] = "true"
