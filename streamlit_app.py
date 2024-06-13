@@ -1,55 +1,61 @@
 import streamlit as st
-import os
 import requests
-import logging
-from langchain_openai import ChatOpenAI
-from langsmith import traceable
-from html.parser import HTMLParser
-from crewai import Crew, Agent, Task, Process
+import os
 
-# Streamlit UI setup
-st.title("SWIFT LAUNCH WORKS")
+# Set the backend URL directly
+backend_url = "https://sw-report-7df9fed5c54e.herokuapp.com"
 
-with st.form(key='input_form_unique'):
-    name = st.text_input("Name", key="name_input")
-    email = st.text_input("Email", key="email_input")
-    product = st.text_input("Product", key="product_input")
-    price = st.number_input("Price", min_value=0, step=1, key="price_input")
-    currency = st.selectbox("Currency", ["USD", "EUR", "GBP", "JPY", "AUD"], key="currency_input")
-    features = st.text_area("Features", key="features_input")
-    benefits = st.text_area("Benefits", key="benefits_input")
-    store = st.selectbox("Store", ["Online", "Physical", "Both"], key="store_input")
-    sales_areas = st.selectbox("Sales Areas", ["Local", "National", "International"], key="sales_areas_input")
-    location = st.text_input("Location", key="location_input")
-    marketing_channels = st.multiselect("Marketing Channels", ["Facebook", "Reddit", "X (Twitter)", "Instagram", "SEO", "Blog", "WhatsApp", "PPC", "Email", "Snapchat"], key="marketing_channels_input")
-    submit_button = st.form_submit_button(label='Generate Report')
+st.title("ICP and Channels Report Generator")
+
+with st.form("input_form"):
+    email = st.text_input("Email")
+    product_service = st.text_input("Product/Service")
+    price = st.number_input("Price", min_value=0.0, format="%f")
+    currency = st.selectbox("Currency", ["USD", "EUR", "GBP"])
+    payment_frequency = st.selectbox("Payment Frequency", ["One-time", "Monthly", "Yearly"])
+    selling_scope = st.selectbox("Selling Scope", ["Locally", "Globally"])
+    location = st.text_input("Location", disabled=(selling_scope == "Globally"))
+
+    marketing_channels = st.multiselect("Marketing Channels", ["Facebook", "Twitter (x)", "Instagram", "Reddit", "TikTok", "SEO", "Blog", "PPC", "LinkedIn"])
+
+    features = st.text_area("Features", help="Enter the features of your product/service")
+    benefits = st.text_area("Benefits", help="Enter the benefits of your product/service")
+
+    submit_button = st.form_submit_button(label="Generate Swift Launch Report")
 
 if submit_button:
-    with st.spinner("Please wait while the report is generating..."):
+    st.info("Sending request to generate your report...")
+    payload = {
+        "email": email,
+        "product_service": product_service,
+        "price": price,
+        "currency": currency,
+        "payment_frequency": payment_frequency,
+        "selling_scope": selling_scope,
+        "location": location,
+        "marketing_channels": marketing_channels,
+        "features": features,
+        "benefits": benefits
+    }
+
+    try:
+        response = requests.post(f'{backend_url}/generate_report', json=payload)
+        response.raise_for_status()  # Raise an HTTPError for bad responses (4xx and 5xx)
+        
         try:
-            # Your logic for generating the report and interacting with the Flask backend
-            # For example, sending data to your Flask endpoint and receiving the report:
-            response = requests.post('https://sw-report-7df9fed5c54e.herokuapp.com/generate_report', json={
-                "email": email,
-                "icp_output": "ICP Output Placeholder",
-                "jtbd_output": "JTBD Output Placeholder",
-                "pains_output": "Pains Output Placeholder",
-                "gains_output": "Gains Output Placeholder",
-                "propdesign_output": "Proposition Design Placeholder",
-                "customerj_output": "Customer Journey Placeholder",
-                "channels_output": "Channels Placeholder",
-                "vc_output": "Value Creation Placeholder"
-            })
+            response_data = response.json()
+        except ValueError:
+            st.error("Failed to parse response as JSON")
+            st.write("Response text:", response.text)
+            response_data = None
+        
+        if response_data:
+            st.write(f"Response status code: {response.status_code}")
+            st.write(f"Response content: {response_data}")
 
             if response.status_code == 200:
-                st.success("Report generation complete! Check your email.")
+                st.success("Report generated and email sent successfully!")
             else:
-                st.error("Failed to generate report. Please try again.")
-
-        except Exception as e:
-            logging.error(f"An error occurred: {e}")
-            st.error(f"An error occurred: {e}")
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8501))
-    st.run(port=port)
+                st.error(f"Failed to generate report: {response_data.get('message')}")
+    except requests.exceptions.RequestException as e:
+        st.error(f"Request failed: {e}")
