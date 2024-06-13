@@ -8,5 +8,4 @@ langsmith
 crewai
 httpx
 embedchain
-chromadb
 python-dotenv
