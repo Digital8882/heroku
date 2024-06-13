@@ -15,8 +15,6 @@ from reportlab.lib.enums import TA_JUSTIFY
 import requests
 import httpx
 from dotenv import load_dotenv
-import embedchain
-import chromadb
 
 app = Flask(__name__)
 
