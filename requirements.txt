@@ -2,9 +2,8 @@ Flask
 streamlit
 gunicorn
 requests
-smtplib
+reportlab
 langchain_openai
 langsmith
 crewai
-markdown
-reportlab
+httpx
